@@ -9,54 +9,62 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
+
+    env:
+      ANDROID_HOME: ${{ github.workspace }}/android-sdk
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK
+      - name: Download Android SDK
         shell: bash
         run: |
           set -e
 
-          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          mkdir -p "$SDK_ROOT/cmdline-tools/latest"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
 
           curl -fL --retry 3 \
             https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
             -o /tmp/android-tools.zip
 
-          mkdir -p /tmp/android-tools
           unzip -q /tmp/android-tools.zip -d /tmp/android-tools
 
-          cp -a /tmp/android-tools/cmdline-tools/. \
-            "$SDK_ROOT/cmdline-tools/latest/"
+          mv /tmp/android-tools/cmdline-tools \
+            "$ANDROID_HOME/cmdline-tools/latest"
 
-          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
-          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+      - name: Install Android SDK Packages
+        shell: bash
+        run: |
+          set -e
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
 
           yes | "$SDKMANAGER" \
-            --sdk_root="$SDK_ROOT" --licenses || true
+            --sdk_root="$ANDROID_HOME" --licenses || true
 
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
-      - name: Build Debug APK
+      - name: Build APK
         shell: bash
         run: |
           set -e
@@ -64,15 +72,11 @@ jobs:
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
             ./gradlew assembleDebug --stacktrace
-          elif command -v gradle >/dev/null 2>&1; then
-            gradle assembleDebug --stacktrace
           else
-            echo "ERROR: Gradle wrapper and Gradle executable are missing."
-            exit 1
+            gradle assembleDebug --stacktrace
           fi
 
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: DayPlannerOffline-APK
